@@ -14,6 +14,54 @@ backend/SolarMonitoring.API/    ASP.NET Core 8 API
 frontend/                       React + Vite UI
 ```
 
+## Run everything with Docker
+
+The whole stack — frontend, backend, and database — runs from `docker-compose.yml`. The frontend is built to static files and served by **nginx**, which also reverse-proxies `/api/*` to the backend (single origin, so no CORS). Only the `web` (nginx) container is published; `api` and `mongodb` talk over the internal docker network by service name.
+
+```bash
+cp .env.example .env          # then edit credentials (and Mqtt__* for live ingestion)
+docker compose up -d --build
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:9006/   # -> 200
+```
+
+The app is then served at <http://127.0.0.1:9006>. The backend runs with `ASPNETCORE_ENVIRONMENT=Production` (Swagger off), and its mock connection string in `appsettings.json` is overridden by `MongoDb__ConnectionString` pointing at the `mongodb` service.
+
+```bash
+docker compose ps
+docker compose logs -f api
+docker compose up -d --build api   # rebuild just the backend after code changes
+docker compose down                # stop (Mongo data persists)
+docker compose down -v             # stop AND wipe the database volume
+```
+
+### Local development with direct ports
+
+The base compose only exposes nginx on `127.0.0.1:9006`. To also reach the API (Swagger), MongoDB, and mongo-express directly while developing, layer the dev override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+| Service | URL | Notes |
+| --- | --- | --- |
+| Frontend (nginx) | <http://localhost:8080> | `WEB_PORT`; also still on `:9006` |
+| Backend API | <http://localhost:5050/api> | `API_PORT`; runs in Development (Swagger on) |
+| mongo-express | <http://localhost:8081> | DB web UI |
+
+### Deploy to the shared host (microlab.club)
+
+The host routes `https://<team>.microlab.club` to whatever listens on `127.0.0.1:9006`, with a **512 MB per-container** cap on a shared, no-swap box. The base `docker-compose.yml` is already shaped for this: nginx bound to `127.0.0.1:9006`, no other published ports, `mem_limit` on every service, and Mongo's WiredTiger cache capped. On the server:
+
+```bash
+cd ~/pbl-26-solar-panel
+cp .env.example .env      # set real passwords + Mqtt__* (kept out of git)
+docker compose up -d --build
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:9006/
+git pull && docker compose up -d --build   # redeploy latest
+```
+
+For local development without containers, run the backend and frontend directly — see [Backend](#backend) and [Frontend](#frontend) below.
+
 ## MongoDB (Docker)
 
 A `docker-compose.yml` at the repo root spins up MongoDB plus `mongo-express` (a small web UI). All credentials come from `.env` — copy `.env.example` first:
